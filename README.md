@@ -14,7 +14,7 @@ Analýza faktorů spojených s výší grantu v programu [Evropský sbor solidar
 
 ## Data
 
-`solidarita.RData` — datový rámec v R, jeden řádek = jeden schválený projekt.
+`solidarita.RData` – datový rámec v R, jeden řádek = jeden schválený projekt.
 
 **Zdroj:** Sesbíráno z veřejného portálu [youth.europa.eu/solidarity/projects](https://youth.europa.eu/solidarity/projects) začátkem roku 2023. Obohaceno o charakteristiky jednotlivých zemí z veřejných zdrojů (CIA World Factbook, Světová banka, Human Freedom Index).
 
@@ -22,7 +22,7 @@ Analýza faktorů spojených s výší grantu v programu [Evropský sbor solidar
 
 | Proměnná | Typ | Popis |
 |---|---|---|
-| `eu_grant` | numeric | Výše grantu (€) — závislá proměnná |
+| `eu_grant` | numeric | Výše grantu (€) – závislá proměnná |
 | `action` | character | Typ výzvy (4 kategorie) |
 | `length_days` | numeric | Délka projektu ve dnech |
 | `activities_count` | integer | Počet aktivit |
@@ -58,4 +58,4 @@ https://ropej.github.io/eu-solidarity-corps-grants/
 ## Licence
 
 Kód: [MIT](LICENSE)  
-Data: [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) — data pocházejí z veřejného portálu EU; doplňující data na úrovni zemí z veřejných zdrojů.
+Data: [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) – data pocházejí z veřejného portálu EU; doplňující data na úrovni zemí z veřejných zdrojů.
