@@ -1,0 +1,1625 @@
+---
+title: "Modelování výše grantů Evropského sboru solidarity"
+author: "Romana Pejcalová"
+date: "2023-03-12"
+lang: cs
+execute:
+  execute-dir: file
+format:
+  html:
+    theme: journal
+    toc: true
+    toc-depth: 3
+    toc-location: right
+    embed-resources: true
+    number-sections: true
+    number-depth: 3
+    code-fold: true
+    code-summary: "Zobrazit kód"
+    crossref:
+      fig-title: "Obrázek"
+      tbl-title: "Tabulka"
+    smooth-scroll: true
+    code-copy: true
+editor: visual
+---
+
+```{css, echo=FALSE}
+h1, h2, h3, h4, h5, h6 {
+  color: #007B3DFF;
+}
+
+h3 {
+  font-size: 1.2rem;
+}
+
+figcaption,
+.figure-caption,
+.quarto-float-caption-inner {
+  text-align: center !important;
+  color: #6c757d;
+  font-size: 0.95em;
+  text-align: left;
+}
+
+figure.quarto-float-tbl figcaption.quarto-float-caption-top {
+  text-align: left !important;
+  color: #6c757d;
+  font-size: 0.95em;
+}
+
+table caption {
+  text-align: left !important;
+  color: #6c757d;
+  font-size: 0.95em;
+}
+
+table th {
+  text-align: center !important;
+  vertical-align: middle !important;
+}
+
+table.tbl-ciselne-char {
+  width: 97% !important;
+}
+```
+
+```{r setup}
+#| include: false
+library(ggplot2)
+
+# Výchozí grafický motiv
+theme_set(theme_minimal())
+
+# Barevná paleta použitá v celém reportu
+barvy <- c('#D51317', '#F39200', '#EFD500', '#95C11F', '#007B3DFF', '#31B7BC', '#0094CD')
+
+# Nastavení českého prostředí a desetinné čárky
+loc <- Sys.setlocale(locale = "Czech")
+options(OutDec = ",")
+```
+
+```{r priprava-datasetu}
+#| message: false
+#| warning: false
+# Načtení používaných balíčků
+library(tidyverse)
+library(kableExtra)
+library(plotly)
+library(scales)
+library(modelsummary)
+library(ggplot2)
+
+# Načetní datasetu
+load("solidarita.RData")
+
+# Funkce na přejmenování sloupců: . -> _
+rename_cols <- function(df) {
+  names(df) <- gsub("\\.", "_", names(df))
+  df
+}
+solidarita       <- rename_cols(solidarita)
+
+# Příprava proměnných
+solidarita <- solidarita |>
+  mutate(
+    activities_more_than_one = activities_count > 1,
+    length_months = ceiling(as.integer(length_days) / 30),
+    action_2 = factor(
+      ifelse(action %in% c("Volunteering Projects", 
+                           "Volunteering Teams in High Priority Areas"),
+             "Volunteering", "Other"),
+      levels = c("Other", "Volunteering")
+    ),
+    eu_subregions_2 = factor(
+      ifelse(eu_subregions == "Eastern Europe", "Eastern", "Other"),
+      levels = c("Other", "Eastern")
+    )
+  )
+
+# Data pro modelování (bez NA a nul)
+solidarita_model <- solidarita |>
+  filter(!is.na(eu_grant), eu_grant > 0, 
+         !is.na(eu_subregions_2))
+```
+
+# Evropský sbor solidarity {#sec-uvod}
+
+[Evropský sbor solidarity](https://youth.europa.eu/solidarity_cs) je iniciativa Evropské komise zaměřená na podporu mladých lidí ve věku 18–30 let, kteří se chtějí aktivně zapojit do veřejně prospěšných projektů – ať už ve své domovské zemi, nebo v zahraničí. Hlavním cílem je podpora **dobrovolnictví**, **stáží** a **pracovních příležitostí** v oblasti solidární pomoci, občanské angažovanosti a inkluzivní společnosti.
+
+Program nabízí čtyři typy aktivit:
+
+-   **Dobrovolnické projekty** (*Volunteering Projects*) – nejčastější forma, projekty zaměřené na pomoc potřebným.
+-   **Projekty solidarity** (*Solidarity Projects*) – menší místní projekty iniciované samotnými mladými lidmi.
+-   **Stáže a pracovní místa** (*Traineeships and Jobs*) – pracovní a vzdělávací příležitosti se společenským přínosem.
+-   **Dobrovolnické týmy v oblastech** **s vysokou prioritou** (*Volunteering Teams in High Priority Areas*) – mezinárodní dobrovolnické týmy zaměřené na aktuální priority Evropské unie.
+
+Projekty jsou spolufinancovány z grantu EU a jejich výše závisí na řadě faktorů – délce projektu, typu aktivity, či tématickém zaměření.
+
+# Sběr a struktura dat {#sec-data}
+
+## Získání dat
+
+Data byla získána **scrapováním** veřejně dostupného portálu [youth.europa.eu/solidarity/projects](https://youth.europa.eu/solidarity/projects), který eviduje všechny schválené projekty. Ke každému projektu jsou dostupné informace o výši grantu, době realizace, tematickém zaměření, žadateli a zemi původu.
+
+Datový soubor byl dále rozšířen o charakteristiky jednotlivých zemí, jako jsou subregion, státní zřízení, členství v EU, EMU, NATO a OSN, hustota zalidnění, HDP, míra nezaměstnanosti a Human Freedom Index.
+
+## Struktura datasetu
+
+```{r tbl-popis-dat}
+#| echo: false
+#| tbl-cap: "Základní popis datasetu"
+# Počet projektů v analyzovaném souboru
+M <- nrow(solidarita)
+
+# Souhrnná tabulka základních charakteristik datasetu
+tab_popis <- data.frame(
+  Charakteristika = c(
+    "Celkový počet pozorování",
+    "Počet zemí",
+    "Výstupní proměnná",
+    "Počet indikátorů",
+    "Pozorování s vyplněným grantem (> 0)",
+    "Rok zahájení projektů",
+    "Dokončeno (ke dni analýzy)"
+  ),
+  Hodnota = c(
+    format(M, big.mark = "\u00a0"),
+    "34 (vč. Turecka; Curaçao a Aruba jako samostatné státy)",
+    "Výše grantu (v €)",
+    "104+",
+    paste0(format(sum(!is.na(solidarita$eu_grant) & solidarita$eu_grant > 0), 
+                  big.mark = "\u00a0"),
+           " (", 
+           round(mean(!is.na(solidarita$eu_grant) & solidarita$eu_grant > 0) * 100, 1),
+           " %)"),
+    "2019–2022",
+    paste0("přibližně ", 
+           round(sum(solidarita$end_date < "2023-03-12") * 100 / nrow(solidarita), 2),
+           " %")
+  )
+)
+
+# Zobrazení tabulky v reportu
+kbl(tab_popis, col.names = c("Charakteristika", "Hodnota")) |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE) |>
+  column_spec(1, bold = TRUE)
+```
+
+Indikátory lze rozdělit do tří skupin: **(1) charakteristiky schválených projektů** (datum realizace, témata, typ výzvy, počet aktivit), **(2) charakteristiky žadatelské země** (subregion, státní zřízení, členství v mezinárodních organizacích, ekonomické ukazatele, Human Freedom Index) a **(3) tematické okruhy projektů** (vzdělání, občanství, rovnost, kultura, ekologie, evropanství, životní styl, regionální, digitální).
+
+## Výše grantu jako cílová proměnná
+
+**Výše grantu** je kladná spojitá proměnná s výrazně pravostranně asymetrickým rozdělením a četnými odlehlými hodnotami.
+
+```{r output-grant-data}
+#| echo: false
+# Projekty s vyplněnou a kladnou výší grantu
+s_grant <- solidarita[!is.na(solidarita$eu_grant) & solidarita$eu_grant > 0, ]
+
+# Střední hodnota a medián výše grantu
+med_g   <- median(s_grant$eu_grant)
+mean_g  <- mean(s_grant$eu_grant)
+```
+
+```{r fig-grant-hist}
+#| echo: false
+#| fig-cap: "Histogram výše grantu (oříznutý na 200 tis. €)"
+# Histogram výše grantu s vyznačením mediánu a průměru
+p_hist <- ggplot(s_grant, aes(x = eu_grant)) +
+  geom_histogram(fill = barvy[5], color = "white", bins = 60) +
+  
+  # Svislé čáry pro medián a průměr
+  geom_vline(data = data.frame(hodnota = c(med_g, mean_g),
+                               stat = c("Medián: 12 479 €", "Průměr: 28 396 €")),
+    aes(xintercept = hodnota, color = stat),
+    linewidth = 1, linetype = "dashed") +
+
+  # Barvy legendy pro medián a průměr
+  scale_color_manual(name   = NULL,
+                     values = c("Medián: 12 479 €" = barvy[6], 
+                                "Průměr: 28 396 €" = barvy[1])) +
+  
+  # Popisky mediánu a průměru přímo v grafu
+  annotate("text", x = med_g,  y = Inf,
+           label = paste0("medián: ", format(round(med_g), 
+                                             big.mark = "\u00a0"), " €"),
+           vjust = 1.5, hjust = 1.05, color = barvy[6], size = 3.2) +
+  annotate("text", x = mean_g, y = Inf,
+           label = paste0("průměr: ", format(round(mean_g), 
+                                             big.mark = "\u00a0"), " €"),
+           vjust = 3.0, hjust = -0.05, color = barvy[1], size = 3.2) +
+
+  # Oříznutí extrémních hodnot pro čitelnější zobrazení rozdělení
+  coord_cartesian(xlim = c(0, 200000)) +
+  scale_x_continuous(labels = label_number(suffix = " tis.", scale = 1e-3)) +
+  scale_y_continuous(labels = scales::label_number(big.mark = " ", 
+                                                   decimal.mark = ",")) +
+  labs(x = "Výše grantu (v €)", y = "Počet grantů") +
+  theme(legend.position.inside = c(0.98, 0.98),
+        legend.justification = c("right", "top"))
+
+# Interaktivní verze grafu
+ggplotly(p_hist, tooltip = c("x", "y")) |> 
+  layout(legend = list(x = 1, y = 1, xanchor = "right", yanchor = "top")) |>
+  config(
+    displayModeBar = TRUE, displaylogo = FALSE,
+    modeBarButtonsToRemove = 
+      c("zoom", "toImage", "pan2d", "select2d", "lasso2d", "autoScale2d",
+        "hoverClosestCartesian", "hoverCompareCartesian","toggleSpikelines")
+    )
+```
+
+```{r fig-grant-box}
+#| echo: false
+#| warning: false
+#| fig-cap: "Krabicový diagram výše grantu (bez oříznutí)"
+# Boxplot výše grantu doplněný o jednotlivá pozorování
+p_box <- ggplot(s_grant, aes(x = "", y = eu_grant)) +
+  
+  # Jednotlivé granty s mírným horizontálním rozptylem 
+  geom_jitter(
+    width = 0.25,
+    color = "darkgreen",
+    # alpha = 0.25,
+    size = 2) +
+  
+  # Boxplot bez zobrazení odlehlých hodnot
+  geom_boxplot(
+    fill = barvy[5],
+    color = "black",          # rámeček boxplotu
+    linewidth = 0.5,
+    outlier.shape = NA) +  # schová původní outliery
+  coord_flip() +
+  scale_y_continuous(
+    labels = scales::label_number(suffix = " tis.", scale = 1e-3)) +
+  scale_x_discrete(expand = expansion(add = 0.2)) +
+  labs(x = "Výše grantu (v €)", y = NULL)
+
+# Interaktivní verze grafu
+ggplotly(p_box, tooltip = c("y"), height = 200) |>
+  style(opacity = 0.5, traces = 1) |>
+  config(
+    displayModeBar = TRUE, displaylogo = FALSE,
+    modeBarButtonsToRemove =
+      c("zoom", "toImage", "pan2d", "select2d", "lasso2d", "autoScale2d",
+        "hoverClosestCartesian", "hoverCompareCartesian","toggleSpikelines")
+    )
+```
+
+```{r tbl-ciselne-char}
+#| echo: false
+#| tbl-cap: "Číselné charakteristiky výše grantu"
+# Základní popisné statistiky výše grantů
+tab_char <- data.frame(
+  Ukazatel = c("Průměr", "Medián", "1. kvartil", "3. kvartil",
+               "Směrodatná odchylka", "IQR", "Variační koeficient", "Počet NA"),
+  Hodnota = c(
+    paste0(format(round(mean_g), big.mark = "\u00a0"), " €"),
+    paste0(format(round(med_g),  big.mark = "\u00a0"), " €"),
+    paste0(format(6888, big.mark = "\u00a0"), " €"),
+    paste0(format(29514, big.mark = "\u00a0"), " €"),
+    paste0(format(round(sd(s_grant$eu_grant)), big.mark = "\u00a0"), " €"),
+    paste0(format(22626, big.mark = "\u00a0"), " €"),
+    paste0(round(sd(s_grant$eu_grant) / mean(s_grant$eu_grant) * 100, 1), " %"),
+    as.character(sum(is.na(solidarita$eu_grant)))
+  )
+)
+
+# Tabulka charakteristik rozdělení grantů
+kbl(tab_char, col.names = c("Ukazatel", "Hodnota"), 
+    align = c("l", "c")) |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE) |>
+  column_spec(1, bold = TRUE)
+```
+
+Rozdělení výše grantu je výrazně pravostranně asymetrické. Většina projektů získala nižší granty, zatímco menší počet projektů obdržel velmi vysoké částky. Tomu odpovídá skutečnost, že **průměr** (28 396 €) **je `r round(mean_g / med_g, 2)`x vyšší než medián** (12 479 €) a převyšuje jej pouze 27 % pozorování. Variační koeficient dosahuje 198,7 %, což ukazuje na značnou heterogenitu financovaných projektů. Polovina grantů se nachází v intervalu mezi prvním a třetím kvartilem (6 888 € až 29 514 €). Lillieforsův test normality zamítá na 5% hladině předpoklad normálního rozdělení ($p$-hodnota \< 2,2 $\times 10^{-16}$).
+
+Nenormalita závislé proměnné sama o sobě nepředstavuje problém pro regresní modelování. Vzhledem k charakteru dat (kladné hodnoty, asymetrie, odlehlá pozorování) však může být vhodnější využít GLM namísto klasické lineární regrese.
+
+## Průzkumová analýza dat {#sec-eda}
+
+### Výše grantů podle struktury projektů {#sec-struktura}
+
+```{r eda-basic-prep}
+#| include: false
+# Projekty s dostupnou informací o výši grantu
+s <- solidarita |> filter(!is.na(eu_grant))
+
+# Kategorizace délky projektu
+s <- s |> 
+  mutate(delka_kat = 
+           cut(as.integer(length_days),
+               breaks = c(0, 365, 730, 1095, 1461),
+               labels = c("méně než rok", "1–2 roky", "2–3 roky", "3–4 roky"),
+               right = FALSE))
+```
+
+```{r eda-boxprep}
+# Projekty s nenulovým grantem a kategorií délky
+s_nz <- solidarita |>
+  filter(!is.na(eu_grant), eu_grant > 0) |>
+  mutate(delka_kat = 
+           cut(as.integer(length_days),
+               breaks = c(0, 365, 730, 1095, 1461),
+               labels = c("méně než rok", "1–2 roky", "2–3 roky", "3–4 roky"),
+               right = FALSE))
+```
+
+::: {layout="[[33,33,33]]"}
+```{r eda-bar-delka}
+#| echo: false
+# Příprava grafu rozdělení projektů podle délky realizace
+p_bar_delka <- s |>
+  filter(!is.na(delka_kat)) |>
+  count(delka_kat) |>
+  mutate(podil = n / sum(n),
+         tooltip = paste0("Typ: ", delka_kat,
+                          "<br>Počet grantů: ", n,
+                          "<br>Podíl: ", scales::percent(podil, accuracy = 0.1))) |>
+  ggplot(aes(x = delka_kat, y = podil, fill = delka_kat, text = tooltip)) +
+  geom_col() +
+  scale_fill_manual(values = barvy[1:4], guide = "none") +
+  scale_y_continuous(labels = scales::label_percent(accuracy = 1)) +
+  labs(x = "Délka projektu", y = "Podíl grantů") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        plot.margin = margin(t = 5, r = 5, b = 35, l = 5, unit = "pt")
+        )
+
+# Interaktivní verze grafu
+ggplotly(p_bar_delka, tooltip = "text") |>
+  config(
+    displayModeBar = TRUE,
+    displaylogo = FALSE,
+    modeBarButtonsToRemove = c(
+      "zoom", "toImage", "pan2d", "select2d", "lasso2d", "autoScale2d",
+      "hoverClosestCartesian", "hoverCompareCartesian", "toggleSpikelines"
+    )
+  )
+```
+
+```{r eda-bar-pocet}
+#| echo: false
+# Příprava grafu rozdělení projektů podle počtu realizací
+p_bar_pocet <- s |>
+  filter(!is.na(topics_count)) |>
+  count(topics_count) |>
+  mutate(podil = n / sum(n),
+         tooltip = paste0("Typ: ", topics_count,
+                          "<br>Počet grantů: ", n,
+                          "<br>Podíl: ", scales::percent(podil, accuracy = 0.1))) |>
+  ggplot(aes(x = factor(pmin(topics_count, 4)), 
+             y = podil, 
+             fill = factor(pmin(topics_count, 4)),
+             text = tooltip)) +
+  geom_col() +
+  scale_fill_manual(values = barvy[3:6], guide = "none") +
+  scale_x_discrete(labels = c("1", "2", "3", "4+")) +
+  scale_y_continuous(labels = scales::label_percent(accuracy = 1)) +
+  labs(x = "Počet tematických okruhů", y = "Podíl grantů") +
+  theme(
+    plot.margin = margin(t = 5, r = 5, b = 55, l = 5, unit = "pt")
+    )
+
+# Interaktivní verze grafu
+ggplotly(p_bar_pocet, tooltip = "text") |>
+  config(
+    displayModeBar = TRUE,
+    displaylogo = FALSE,
+    modeBarButtonsToRemove = c(
+      "zoom", "toImage", "pan2d", "select2d", "lasso2d", "autoScale2d",
+      "hoverClosestCartesian", "hoverCompareCartesian", "toggleSpikelines"
+    )
+  )
+```
+
+```{r eda-bar-typ-vyzvy}
+#| echo: false
+# Příprava grafu rozdělení projektů podle typu výzvy
+p_bar_typ_vyzvy <- s |>
+  filter(!is.na(action)) |>
+  count(action) |>
+  mutate(podil = n / sum(n),
+         tooltip = paste0("Typ: ", action,
+                          "<br>Počet grantů: ", n,
+                          "<br>Podíl: ", scales::percent(podil, accuracy = 0.1))) |>
+  ggplot(aes(x = action, y = podil, fill = action, text = tooltip)) +
+  geom_col() +
+  scale_fill_manual(values = barvy[c(5, 2, 1, 4)], guide = "none") +
+  scale_y_continuous(labels = scales::label_percent(accuracy = 1)) +
+  scale_x_discrete(labels = c(
+    "Solidarita", "Stáže & Práce", "Dobrovolnictví", 
+    "Dobrovolnictví \n(prior. oblasti)")
+    ) +
+  labs(x = "Typ akční výzvy", y = "Podíl grantů") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        plot.margin = margin(t = 5, r = 5, b = 5, l = 5, unit = "pt")
+        )
+
+# Interaktivní verze grafu
+ggplotly(p_bar_typ_vyzvy, tooltip = "text") |>
+  config(
+    displayModeBar = TRUE,
+    displaylogo = FALSE,
+    modeBarButtonsToRemove = c(
+      "zoom", "toImage", "pan2d", "select2d", "lasso2d", "autoScale2d",
+      "hoverClosestCartesian", "hoverCompareCartesian", "toggleSpikelines"
+    )
+  )
+```
+:::
+
+Typický projekt je **dobrovolnický projekt** s délkou realizace **1–2 roky** a zaměřením na **tři tematické okruhy**.
+
+::: {layout="[[33,33,33]]"}
+```{r eda-box-delka}
+#| echo: false
+# Příprava boxplotu projektů podle délky realizace
+p_delka <- 
+  s_nz |> filter(!is.na(delka_kat)) |>
+  ggplot(aes(x = delka_kat, y = eu_grant, fill = delka_kat)) +
+  geom_boxplot(outlier.size = 0.4, outlier.alpha = 0.3,
+               varwidth = TRUE) +
+  coord_cartesian(ylim = c(0, 200000)) +
+  scale_y_continuous(labels = label_number(suffix = " tis.", scale = 1e-3)) +
+  scale_fill_manual(values = barvy[1:4], guide = "none") +
+  labs(x = "Délka projektu", y = "Výše grantu (v €)") +
+  theme(axis.text.x = element_text(angle = 55, hjust = 1),
+        plot.margin = margin(t = 5, r = 0, b = 65, l = 0, unit = "pt")
+        )
+
+# Interaktivní verze grafu
+ggplotly(p_delka, tooltip = c("x", "y", "fill")) |>
+      config(
+      displayModeBar = TRUE,
+      displaylogo = FALSE,
+      modeBarButtonsToRemove = c(
+        "zoom", "toImage", "pan2d", "select2d", "lasso2d", "autoScale2d",
+        "hoverClosestCartesian", "hoverCompareCartesian", "toggleSpikelines"
+        )
+      )
+```
+
+```{r eda-box-pocet}
+#| echo: false
+# Příprava boxplotu projektů podle počtu realizací
+p_pocet <- 
+  s_nz |> filter(!is.na(topics_count)) |>
+  ggplot(aes(x = factor(pmin(topics_count, 4)), 
+             y = eu_grant, 
+             fill = factor(pmin(topics_count, 4)))) +
+  geom_boxplot(outlier.size = 0.4, outlier.alpha = 0.3,
+               varwidth = TRUE) +
+  coord_cartesian(ylim = c(0, 200000)) +
+  scale_y_continuous(labels = label_number(suffix = " tis.", scale = 1e-3)) +
+  scale_fill_manual(values = barvy[3:6], guide = "none") +
+  scale_x_discrete(labels = c("1", "2", "3", "4+")) +
+  labs(x = "Počet tematických okruhů", y = "Výše grantu (v €)") +
+  theme(
+        plot.margin = margin(t = 5, r = 0, b = 60, l = 0, unit = "pt")
+        )
+
+# Interaktivní verze grafu
+ggplotly(p_pocet, tooltip = c("x", "y", "fill")) |>
+      config(
+      displayModeBar = TRUE,
+      displaylogo = FALSE,
+      modeBarButtonsToRemove = c(
+        "zoom", "toImage", "pan2d", "select2d", "lasso2d", "autoScale2d",
+        "hoverClosestCartesian", "hoverCompareCartesian", "toggleSpikelines"
+        )
+      )
+```
+
+```{r eda-box-typ-vyzvy}
+#| echo: false
+# Příprava boxplotu projektů podle typu výzvy
+p_typ_vyzvy <- 
+  s_nz |> filter(!is.na(action)) |>
+  ggplot(aes(x = action, y = eu_grant, fill = action)) +
+  geom_boxplot(outlier.size = 0.4, outlier.alpha = 0.3,
+               varwidth = TRUE) +
+  coord_cartesian(ylim = c(0, 200000)) +
+  scale_y_continuous(labels = label_number(suffix = " tis.", scale = 1e-3)) +
+  scale_fill_manual(values = barvy[c(5, 2, 1, 4)], guide = "none") +
+  scale_x_discrete(labels = c(
+    "Solidarita", "Stáže & Práce", "Dobrovolnictví", 
+    "Dobrovolnictví \n(prior. oblasti)")
+    ) +
+  labs(x = "Typ akční výzvy", y = "Výše grantu (v €)") +
+  theme(axis.text.x = element_text(angle = 55, hjust = 1),
+        plot.margin = margin(t = 5, r = 0, b = 25, l = 0, unit = "pt")
+        )
+
+# Interaktivní verze grafu
+ggplotly(p_typ_vyzvy, tooltip = c("x", "y", "fill")) |>
+      config(
+      displayModeBar = TRUE,
+      displaylogo = FALSE,
+      modeBarButtonsToRemove = c(
+        "zoom", "toImage", "pan2d", "select2d", "lasso2d", "autoScale2d",
+        "hoverClosestCartesian", "hoverCompareCartesian", "toggleSpikelines"
+        )
+      )
+```
+:::
+
+Nadprůměrné granty jsou téměř výhradně spojeny s **dobrovolnickými projekty** (96 %), zatímco u podprůměrných grantů jsou podobně zastoupeny projekty typu Solidarity i Volunteering.
+
+Významným faktorem je délka projektu. **S rostoucí délkou realizace roste i výše grantu**, což odpovídá vyšší finanční náročnosti dlouhodobých aktivit. U podprůměrných grantů je 85 % projektů kratších než dva roky, zatímco u nadprůměrných grantů trvá 85 % projektů jeden až tři roky.
+
+### Geopolitické charakteristiky žadatelů
+
+```{r mapa-granty}
+#| message: false
+#| warning: false
+#| include: false
+# Balíčky pro interaktivní mapy a evropské geodatové podklady
+library(leaflet)
+library(leaflet.extras)
+library(eurostat)
+library(sf)
+
+# Seznam zemí EU a jejich kódů
+EU27 <- eu_countries |>
+  select(geo = code, name)
+
+# Geometrie států EU z Eurostatu
+SHP_27 <- get_eurostat_geospatial(resolution = 10, 
+                                  nuts_level = 0, 
+                                  year = 2016) |>
+  select(geo = NUTS_ID, geometry) |>
+  inner_join(EU27, by = "geo") |>
+  arrange(geo) |>
+  st_as_sf()
+
+# Agregace grantů podle země
+country_stats <- solidarita |>
+  group_by(country) |>
+  summarise(
+    eu_grant      = sum(eu_grant,  na.rm = TRUE),
+    eu_grant_mean = round(mean(eu_grant, na.rm = TRUE)),
+    eu_count      = n()
+  )
+
+# Připojení grantových statistik ke geometrii států
+SHP_27 <- SHP_27 |>
+  left_join(country_stats, by = c("name" = "country"))
+
+# Barevné škály s pevným rozsahem pro srovnatelnost map
+# (pevný rozsah místo automatického domain = SHP_27$eu_grant_mean)
+pal_mean <- colorNumeric(palette = c("#c4ac6a", "#4f3002"), 
+                         domain = c(0, 20000000), na.color = "#cccccc")
+pal_count <- colorNumeric(palette = c("#71cbaf", "#275f4e"), 
+                          domain = c(0, 800), na.color = "#cccccc")
+
+# Mapa průměrné výše grantu
+breaks_mean <- pretty(SHP_27$eu_grant_mean, n = 5)
+mapa_mean <-
+  leaflet(SHP_27) |>
+  addPolygons(
+    fillColor   = ~pal_mean(eu_grant_mean),
+    fillOpacity = 0.8,
+    color       = "#F3F3F3",
+    weight      = 0.5,
+    label = ~paste0(name, ": ", 
+                    scales::number(eu_grant_mean, 
+                                   big.mark = "\u00a0", decimal.mark = ","), 
+                    " €"),
+    highlightOptions = highlightOptions(weight = 2, color = "#666", 
+                                        bringToFront = TRUE)
+  ) |>
+  addLegend(
+      colors    = pal_mean(breaks_mean),
+      labels    = scales::number(breaks_mean, scale = 1e-6, accuracy = 1, 
+                                 big.mark = "\u00a0", suffix = " mil. €"),
+      title     = "Průměrná výše grantů",
+      position  = "bottomright"
+    ) |>
+  setView(lng = 10, lat = 52, zoom = 3.5)
+
+# Mapa počtu grantů
+breaks_count <- pretty(SHP_27$eu_count, n = 5)
+mapa_count <- leaflet(SHP_27) |>
+  addPolygons(
+    fillColor   = ~pal_count(eu_count),
+    fillOpacity = 0.8,
+    color       = "#F3F3F3",
+    weight      = 0.5,
+    label       = ~paste0(name, ": ", eu_count, " grantů"),
+    highlightOptions = highlightOptions(weight = 2, 
+                                        color = "#666", bringToFront = TRUE)
+  ) |>
+addLegend(
+    colors    = pal_count(breaks_count),
+    labels    = as.character(breaks_count),
+    title     = "Počet grantů",
+    position  = "bottomright"
+  ) |>
+  setView(lng = 10, lat = 52, zoom = 3.5)
+```
+
+::: panel-tabset
+## Průměrná výše grantu
+
+```{r}
+#| echo: false
+# Interaktivní mapa průměrné výše grantu
+mapa_mean
+```
+
+## Počet grantů
+
+```{r}
+#| echo: false
+# Interaktivní mapa počtu grantů
+mapa_count
+```
+:::
+
+Do analýzy bylo zahrnuto 34 států. Vedle členských zemí EU jsou samostatně evidována také některá zámořská území, například Curaçao a Aruba.
+
+Nejčastějšími žadateli jsou **Španělsko** (10,5 %), **Itálie** (9 %), **Německo** (8,7 %) a **Francie** (7,3 %) – tato čtveřice tvoří dohromady 35 % všech projektů. Přestože podávají nejvíce žádostí, průměrná výše jejich grantů je **nižší než celkový průměr**.
+
+Naopak **Velká Británie** dosahuje **průměrné** **výše grantu až 3,5× vyšší** než celkový průměr. Přestože britské organizace získaly pouze 1,6 % všech grantů, připadlo na ně 6,1 % celkového objemu přidělených finančních prostředků. Jedním z důvodů může být vyšší zastoupení dobrovolnických projektů, které jsou zpravidla finančně náročnější.
+
+Zatímco Německo, Francie, Španělsko a Itálie realizovaly větší počet spíše menších projektů, **Česká republika**, Slovensko, Slovinsko, Švédsko, Řecko a Portugalsko získaly menší počet grantů s vyšší průměrnou finanční podporou.
+
+Z regionálního pohledu dominovaly státy jižní Evropy (29 %) a střední Evropy (28 %), následované východní (17 %), západní (14 %) a severní Evropou (4 %). Celkově pocházelo 53 % projektů ze **zemí bývalého východního bloku** a 40 % ze západní Evropy.
+
+::: {layout="[[45,33,22]]"}
+```{r eda-box-subreg}
+#| echo: false
+# Příprava boxplotu projektů podle subregionu
+p_subreg <- 
+  s_nz |> filter(!is.na(eu_subregions_cia)) |>
+  ggplot(aes(x = eu_subregions_cia, y = eu_grant, fill = eu_subregions_cia)) +
+  geom_boxplot(outlier.size = 0.4, outlier.alpha = 0.3,
+               varwidth = TRUE) +
+  coord_cartesian(ylim = c(0, 200000)) +
+  scale_y_continuous(labels = label_number(suffix = " tis.", scale = 1e-3)) +
+  scale_fill_manual(values = barvy[1:6], guide = "none") +
+  scale_x_discrete(labels = c(
+    "Střední Evropa", "Východní Evropa", "Blízký východ a sev. Afrika",
+    "Severní Evropa", "Jižní Evropa", "Západní Evropa"
+)) +
+  labs(x = "Evropské subregiony", y = "Výše grantu (v €)") +
+  theme(axis.text.x = element_text(angle = 55, hjust = 1),
+        plot.margin = margin(t = 5, r = 0, b = 10, l = 0, unit = "pt")
+        )
+
+# Interaktivní verze grafu
+ggplotly(p_subreg, tooltip = c("x", "y", "fill")) |>
+      config(
+      displayModeBar = TRUE,
+      displaylogo = FALSE,
+      modeBarButtonsToRemove = c(
+        "zoom", "toImage", "pan2d", "select2d", "lasso2d", "autoScale2d",
+        "hoverClosestCartesian", "hoverCompareCartesian", "toggleSpikelines"
+        )
+      )
+
+```
+
+```{r eda-box-zriz}
+#| echo: false
+# Příprava boxplotu projektů podle typu zřízení žadatelského státu
+p_zriz <- 
+  s_nz |> filter(!is.na(f_statni_zrizeni)) |>
+  ggplot(aes(x = f_statni_zrizeni, y = eu_grant, fill = f_statni_zrizeni)) +
+  geom_boxplot(outlier.size = 0.4, outlier.alpha = 0.3,
+               varwidth = TRUE) +
+  coord_cartesian(ylim = c(0, 200000)) +
+  scale_y_continuous(labels = label_number(suffix = " tis.", scale = 1e-3)) +
+  scale_fill_manual(values = barvy, guide = "none") +
+  labs(x = "Státní zřízení", y = "Výše grantu (v €)") +
+  scale_x_discrete(labels = c(
+    "Monarchie", "Poloprezidentská republika", "Prezidentská republika",
+    "Parlamentní republika")
+    ) +
+  theme(axis.text.x = element_text(angle = 55, hjust = 1),
+        plot.margin = margin(t = 5, r = 0, b = 0, l = 0, unit = "pt")
+        )
+
+# Interaktivní verze grafu
+ggplotly(p_zriz, tooltip = c("x", "y", "fill")) |>
+    config(
+      displayModeBar = TRUE,
+      displaylogo = FALSE,
+      modeBarButtonsToRemove = c(
+        "zoom", "toImage", "pan2d", "select2d", "lasso2d", "autoScale2d",
+        "hoverClosestCartesian", "hoverCompareCartesian", "toggleSpikelines"
+        )
+      )
+```
+
+```{r eda-box-more}
+#| echo: false
+# Příprava boxplotu projektů podle přístupu k moři
+p_more <- 
+  s_nz |> filter(!is.na(sea)) |>
+  mutate(sea = factor(sea, levels = c(TRUE, FALSE), labels = c('Ano', 'Ne'))) |>
+  ggplot(aes(x = sea, y = eu_grant, fill = sea)) +
+  geom_boxplot(outlier.size = 0.4, outlier.alpha = 0.3,
+               varwidth = TRUE) +
+  coord_cartesian(ylim = c(0, 200000)) +
+  scale_y_continuous(labels = label_number(suffix = " tis.", scale = 1e-3)) +
+  scale_fill_manual(values = barvy[c(7, 2)], guide = "none") +
+  labs(x = "Pobřežní stát", y = "Výše grantu (v €)") +
+  theme(axis.text.x = element_text(angle = 55, hjust = 1),
+        plot.margin = margin(t = 5, r = 0, b = 90, l = 0, unit = "pt")
+        )
+
+# Interaktivní verze grafu
+ggplotly(p_more, tooltip = c("x", "y", "fill")) |>
+    config(
+      displayModeBar = TRUE,
+      displaylogo = FALSE,
+      modeBarButtonsToRemove = c(
+        "zoom", "toImage", "pan2d", "select2d", "lasso2d", "autoScale2d",
+        "hoverClosestCartesian", "hoverCompareCartesian", "toggleSpikelines"
+        )
+      )
+```
+:::
+
+Vyšší granty lze pozorovat především u projektů ze **severní a západní Evropy** a ze států **s přístupem k moři**, přičemž výsledky jsou ovlivněny několika mimořádně vysokými granty. Z pohledu státního zřízení jsou rozdíly ve výši grantů spíše malé, přesto monarchie vykazují mírně nižší hodnoty než republiky. Rozdíly mezi jednotlivými skupinami jsou však podstatně menší než variabilita grantů uvnitř těchto kategorií.
+
+::: {layout="[[33,33,33]]"}
+```{r eda-box-emu}
+#| echo: false
+# Příprava boxplotu projektů podle členství v EMU
+p_emu <- 
+  s_nz |> filter(!is.na(f_emu)) |>
+  ggplot(aes(x = f_emu, y = eu_grant, fill = f_emu)) +
+  geom_boxplot(outlier.size = 0.4, outlier.alpha = 0.3,
+               varwidth = TRUE) +
+  coord_cartesian(ylim = c(0, 200000)) +
+  scale_y_continuous(labels = label_number(suffix = " tis.", scale = 1e-3)) +
+  scale_fill_manual(values = barvy[2:5], guide = "none") +
+  labs(x = "Součást Evropské \nměnové unie", y = "Výše grantu (v €)") +
+  theme(axis.text.x = element_text(angle = 55, hjust = 1),
+        plot.margin = margin(t = 5, r = 0, b = 0, l = 0, unit = "pt")
+        )
+
+# Interaktivní verze grafu
+ggplotly(p_emu, tooltip = c("x", "y", "fill")) |>
+      config(
+      displayModeBar = TRUE,
+      displaylogo = FALSE,
+      modeBarButtonsToRemove = c(
+        "zoom", "toImage", "pan2d", "select2d", "lasso2d", "autoScale2d",
+        "hoverClosestCartesian", "hoverCompareCartesian", "toggleSpikelines"
+        )
+      )
+```
+
+```{r eda-box-osn}
+#| echo: false
+# Příprava boxplotu projektů podle členství v OSN
+p_osn <- 
+  s_nz |> filter(!is.na(osn_clenem)) |>
+  ggplot(aes(x = osn_clenem, y = eu_grant, fill = osn_clenem)) +
+  geom_boxplot(outlier.size = 0.4, outlier.alpha = 0.3, 
+               varwidth = TRUE) +
+  coord_cartesian(ylim = c(0, 200000)) +
+  scale_y_continuous(labels = label_number(suffix = " tis.", scale = 1e-3)) +
+  scale_fill_manual(values = barvy[1:4], guide = "none") +
+  labs(x = "Součást Organizace \nspojených národů", y = "Výše grantu (v €)") +
+  theme(axis.text.x = element_text(angle = 55, hjust = 1),
+        plot.margin = margin(t = 5, r = 0, b = 0, l = 0, unit = "pt")
+        )
+
+# Interaktivní verze grafu
+ggplotly(p_osn, tooltip = c("x", "y", "fill")) |>
+      config(
+      displayModeBar = TRUE,
+      displaylogo = FALSE,
+      modeBarButtonsToRemove = c(
+        "zoom", "toImage", "pan2d", "select2d", "lasso2d", "autoScale2d",
+        "hoverClosestCartesian", "hoverCompareCartesian", "toggleSpikelines"
+        )
+      )
+```
+
+```{r eda-box-nato}
+#| echo: false
+# Příprava boxplotu projektů podle členství v NATO
+pom_widths <- s_nz |> 
+  filter(!is.na(nato_clenem)) |> 
+  count(nato_clenem) |> mutate(w = n / max(n))
+p_nato <- 
+  s_nz |> filter(!is.na(nato_clenem)) |>
+  ggplot(aes(x = nato_clenem, y = eu_grant, fill = nato_clenem)) +
+  geom_boxplot(outlier.size = 0.4, outlier.alpha = 0.3,
+               varwidth = TRUE) +
+  coord_cartesian(ylim = c(0, 200000)) +
+  scale_y_continuous(labels = label_number(suffix = " tis.", scale = 1e-3)) +
+  scale_fill_manual(values = barvy[4:7], guide = "none") +
+  labs(x = "Součást \nSeveroatlantické aliance", y = "Výše grantu (v €)") +
+  theme(axis.text.x = element_text(angle = 55, hjust = 1),
+        plot.margin = margin(t = 5, r = 0, b = 0, l = 0, unit = "pt")
+        )
+
+# Interaktivní verze grafu
+ggplotly(p_nato, tooltip = c("x", "y", "fill")) |>
+  style(width = pom_widths$w, traces = seq_along(pom_widths$w)) |>
+  config(
+      displayModeBar = TRUE,
+      displaylogo = FALSE,
+      modeBarButtonsToRemove = c(
+        "zoom", "toImage", "pan2d", "select2d", "lasso2d", "autoScale2d",
+        "hoverClosestCartesian", "hoverCompareCartesian", "toggleSpikelines"
+        )
+      )
+```
+:::
+
+Vyšší granty jsou patrné také u států **mimo eurozónu** a u zemí **s delší historií členství v OSN a NATO**. Délka členství v EU, NATO a OSN, počet europoslanců, rozloha a populace **spolu silně korelují**. Tyto proměnné proto nesou podobnou informaci a při modelování je třeba počítat s multikolinearitou.
+
+### Tematické zaměření projektů
+
+```{r fig-topics}
+#| fig-cap: "Zastoupení tematických okruhů v projektech"
+#| echo: false
+# Proměnné označující tematické zaměření projektů
+topic_vars <- c("topic_vzdelani", "topic_obcanstvi", "topic_rovnost",
+                "topic_kultura", "topic_ekologie", "topic_zivotni_styl",
+                "topic_evropanstvi", "topic_regionalni", "topic_digital")
+
+# České popisky tematických okruhů
+topic_labs <- c("Vzdělání", "Občanství", "Rovnost", "Kultura", "Ekologie",
+                "Životní styl", "Evropanství", "Regionální", "Digitál")
+
+# Podíl a počet projektů podle tematického zaměření
+p_topics <- solidarita |>
+  filter(!is.na(eu_grant)) |>
+  summarise(
+    across(all_of(topic_vars), list(
+      podil = ~mean(.x, na.rm = TRUE),
+      n   = ~sum(.x, na.rm = TRUE)
+    ))
+  ) |>
+  pivot_longer(everything(), names_to = c("var", ".value"), 
+               names_sep = "_(?=[^_]+$)") |>
+  mutate(tema = factor(topic_labs[match(var, topic_vars)],
+                       levels = topic_labs[order(podil)]),
+         tooltip = paste0("Typ tématu: ", topic_labs,
+                          "<br>Počet grantů: ", n,
+                          "<br>Podíl: ", scales::percent(podil, accuracy = 0.1))) |>
+  arrange(podil) |>
+  
+  # Graf četnosti tematických okruhů
+  ggplot(aes(x = n, y = tema, fill = podil, text = tooltip)) +
+  geom_col() +
+  geom_text(aes(label = scales::percent(podil, accuracy = 0.1, decimal.mark = ",")), 
+                hjust = -0.1, size = 3) +
+  scale_fill_gradientn(colors = colorRampPalette(barvy)(9), guide = "none") +
+  scale_x_continuous(labels = scales::label_number(big.mark = "\u00a0")) +
+  labs(x = "Počet projektů", y = NULL) +
+  theme(panel.grid.major.y = element_blank())
+
+# Interaktivní verze grafu
+ggplotly(p_topics, tooltip = c("text")) |> 
+ config(
+      displayModeBar = TRUE,
+      displaylogo = FALSE,
+      modeBarButtonsToRemove = c(
+        "zoom", "toImage", "pan2d", "select2d", "lasso2d", "autoScale2d",
+        "hoverClosestCartesian", "hoverCompareCartesian", "toggleSpikelines"
+        )
+      )
+```
+
+Nejčastěji se projekty věnují **vzdělání** (59 %), **občanství** (51 %) a **rovnosti** (49 %), přičemž jednotlivá témata jsou mezi typy výzev rozložena podobně. Výraznější odchylky lze pozorovat pouze u vzdělávání, evropanství a občanství. **Kultura** (27 %) a **ekologie** (18 %) jsou zastoupeny méně často, zatímco témata zdravého životního stylu, evropské identity, regionálního rozvoje a digitalizace se objevují spíše okrajově. Zároveň víme z @sec-struktura, že typický projekt se zaměřuje na **více tematických okruhů současně**. Pravděpodobně tedy především na vzdělávání, občanskou participaci a rovnost.
+
+# Zdůvodnění volby zobecněného lineárního modelu {#sec-glm-motivace}
+
+Výše grantu je **kladná spojitá proměnná** s výrazně pravostranně asymetrickým rozdělením a těžkým pravým chvostem. Klasický lineární regresní model (OLS) by byl nevhodný hned z několika důvodů:
+
+```{r fig-model-ols}
+#| echo: true
+#| out-width: 100%
+#| fig-height: 3
+#| fig-width: 10
+#| fig-cap: "Diagnostické grafy klasického lineárního modelu"
+# Klasický lineární model (OLS)
+model_ols <- 
+  lm(eu_grant ~ action + length_months + nato_delka_clenstvi + length_years +
+      osn_delka_clenstvi + activities_count + topics_count + 
+       eu_subregions_eurovoc + f_statni_zrizeni + osn_clenem + 
+       prumer4_populace + prumer4_hdp + prumer_hustota_osidleni + 
+       topic_obcanstvi + topic_kultura +  topic_evropanstvi + 
+       topic_regionalni, data = solidarita)
+
+# Diagnostické grafy
+par(mfrow = c(1, 4))
+plot(model_ols)
+```
+
+```{r}
+#| include: false
+par(mfrow = c(1, 1))
+```
+
+#### Omezení klasického lineárního modelu
+
+-   Především připouští záporné predikce, které u výše grantu nedávají smysl.
+-   Dále předpokládá normální rozdělení reziduí, zatímco dle diagnpstických grafů jsou sice přibližně symetrická, ale výrazně špičatá a vykazují těžké chvosty.
+-   Současně není splněn předpoklad konstantního rozptylu reziduí – jejich variabilita se zvyšuje s očekávanou hodnotou grantu.
+-   V datech se navíc nachází několik vlivných pozorování s mimořádně vysokou výší grantu.
+
+Klasický lineární model proto není pro modelování výše grantu vhodný a byla zvolena **zobecněná lineární regrese s Gamma rozdělením a logaritmickou linkovací funkcí**:
+
+```{r}
+#| code-fold: false
+#| eval: false
+model <- glm(eu_grant ~ ., data = solidarita_model, family = Gamma(link = "log"))
+```
+
+#### Gamma GLM s logaritmickou linkovací funkcí
+
+Gamma rozdělení je vhodnou volbou pro modelování kladných spojitých proměnných, u nichž rozptyl roste s očekávanou střední hodnotou. Logaritmická linkovací funkce současně zajišťuje, že **predikované hodnoty grantu jsou vždy kladné**:
+
+$$\log(\mathbb{E}[\text{grant}_i]) = \mathbf{x}_i^\top \boldsymbol{\beta}$$
+
+Po exponenciaci získáme multiplikativní tvar modelu:
+
+$$\mathbb{E}[\text{grant}_i] = e^{\mathbf{x}_i^\top \boldsymbol{\beta}}$$
+
+Každý koeficient $\beta_k$ se interpretuje tak, že při zvýšení příslušného prediktoru o jednu jednotku se očekávaná výše grantu změní $e^{\beta_k}$-krát za jinak stejných podmínek. **Log-lineární model** tak zachycuje relativní (procentní) změny, které bývají při ekonomické interpretaci přirozenější než změny absolutní.
+
+# Porovnání modelů s interakcemi a bez interakcí {#sec-porovnani}
+
+## Použité proměnné a přístup
+
+Ze všech dostupných indikátorů bylo po průzkumové analýze vybráno šest vysvětlujících proměnných:
+
+```{r tbl-promenne}
+#| echo: false
+#| tbl-cap: "Vysvětlující proměnné ve finálních modelech"
+# Přehled proměnných použitých ve finálním modelu
+tab_prom <- data.frame(
+  Proměnná = c("`activities_more_than_one`", "`length_days`", "`action_2`",
+               "`eu_subregions_2`", "`sea`", "`topic_rovnost`"),
+  Typ = c("Binární", "Spojitá", "Faktor (2 úrovně)", 
+          "Faktor (2 úrovně)", "Binární", "Binární"),
+  Popis = c(
+    "Zda má projekt více než jednu aktivitu",
+    "Délka projektu ve dnech",
+    "Typ výzvy: Dobrovolnictví / Solidarita + Stáže a pracovní místa",
+    "Subregion žadatele: Západní Evropa + Severní Afrika + Blízký východ / Východní Evropa",
+    "Zda má žadatelská země přístup k moři",
+    "Zda se projekt týká rovnosti (rovné příležitosti, inkluze apod.) / jiného téma než rovnost"
+  )
+)
+
+# Tabulka použitých regresorů
+kbl(tab_prom, col.names = c("Proměnná", "Typ", "Popis"),
+    escape = FALSE) |>
+  kable_styling(bootstrap_options = c("striped", "hover")) |>
+  column_spec(1, monospace = TRUE, bold = TRUE)
+```
+
+Modelování probíhalo ve dvou krocích: nejprve byl vybrán **model bez interakcí** (postupným odebíráním nevýznamných koeficientů), poté byl doplněn o **interakce 1. řádu** a opět redukován.
+
+```{r modely}
+# Převod délky projektu na celé měsíce
+solidarita_model$length_months <- ceiling(solidarita_model$length_days / 30)
+
+# Model bez interakce
+model_nointer_final <- glm(
+  eu_grant ~ activities_more_than_one + length_months + action_2 +
+    eu_subregions_2 + sea + topic_rovnost,
+  data = solidarita_model, family = Gamma(link = "log")
+)
+
+# Model s vybranými interakcemi druhého řádu
+model_inter_final <- glm(
+  eu_grant ~
+    topic_rovnost + 
+    (activities_more_than_one + length_days + action_2 + eu_subregions_2 + sea)^2 -
+    activities_more_than_one:length_days -
+    activities_more_than_one:action_2 -
+    activities_more_than_one:sea -
+    length_days:eu_subregions_2,
+  data = solidarita_model, family = Gamma(link = "log")
+)
+```
+
+## Kvantitativní srovnání kvality modelů
+
+```{r tbl-srovnani-modelu}
+#| tbl-cap: "Srovnání modelu bez interakce a s interakcí"
+# Pomocné souhrnné statistiky modelů pro použití v textu
+aic_ni <- round(AIC(model_nointer_final), 1)
+bic_ni <- round(BIC(model_nointer_final), 1)
+aic_i  <- round(AIC(model_inter_final), 1)
+bic_i  <- round(BIC(model_inter_final), 1)
+dev_ni <- round(1 - model_nointer_final$deviance / model_nointer_final$null.deviance, 4)
+dev_i  <- round(1 - model_inter_final$deviance  / model_inter_final$null.deviance,  4)
+p_anova <- anova(model_nointer_final, 
+                 model_inter_final, test = "LRT")[["Pr(>Chi)"]][2]
+
+# Modelsummary nezahrnuje pseudo-R2 ani LRT X2 - přidáme je jako vlastní GOF statistiky
+glance_custom.glm <- function(x, ...) {
+  data.frame(
+    pseudo_r2 = scales::percent(
+      1 - (x$deviance / x$null.deviance),
+      accuracy = 0.1, decimal.mark = ","
+    ),
+    lrt_x2    = x$null.deviance - x$deviance,
+    lrt_df = as.integer(x$df.null - x$df.residual),
+    n_params = as.integer(x$df.null - x$df.residual + 1)
+  )
+}
+
+# Definice statistik zobrazovaných ve spodní části tabulky
+gof_custom <- tribble(
+  ~raw,        ~clean,              ~fmt,
+  "nobs",      "Počet pozorování",  0,
+  "n_params",  "Počet parametrů",   0,
+  "aic",       "Akaikeho informační kritérium (AIC)",               1,
+  "bic",       "Bayesovo informační kritérium (BIC)",               1,
+  "pseudo_r2", "Pseudo-R²",         3,
+  "lrt_x2",     "LRT X2 statistika",          2,
+  "df.residual", "Residuální stupně volnosti",  0
+)
+
+# Vytvoření tabulky koeficientů a statistik modelů
+df <- modelsummary(
+  list(
+    "Model bez interakce" = model_nointer_final,
+    "Model s interakcí"   = model_inter_final
+  ),
+  estimate   = "{estimate} [{conf.low}; {conf.high}] {stars}",
+  statistic  = NULL,
+  conf_level = 0.95,
+  exponentiate = TRUE,
+  fmt   = 2,
+  stars = c("." = 0.1, "*" = 0.05, "**" = 0.01, "***" = 0.001),
+  # gof_omit = "F|RMSE|R2|dev",
+  gof_map  = gof_custom,
+  coef_rename = c(
+    "(Intercept)" = "(Konstanta)",
+    "topic_rovnostTRUE" = "Téma rovnosti",
+    "activities_more_than_oneTRUE" = "Více než jedna aktivita",
+    "length_days" = "Délka projektu (dny)",
+    "action_2Volunteering" = "Dobrovolnický projekt",
+    "eu_subregions_2Eastern" = "Východní Evropa",
+    "seaTRUE" = "Přímořská destinace",
+    "activities_more_than_oneTRUE:eu_subregions_2Eastern" = "Více aktivit × Východní Evropa",
+    "length_days:action_2Volunteering" = "Délka (dny) × Dobrovolnictví",
+    "length_days:seaTRUE" = "Délka (dny) × Přímořská destinace",
+    "action_2Volunteering:eu_subregions_2Eastern" = "Dobrovolnictví × Východní evropa",
+    "action_2Volunteering:seaTRUE" = "Dobrovolnictví × Přímořská destinace",
+    "eu_subregions_2Eastern:seaTRUE" = "Východní EU × Přímořská destinace",
+    "length_months" = "Délka projektu (měsíce)"
+    ),
+  output   = "data.frame"
+)
+
+
+# cell_spec() obaluje hodnoty HTML tagy; parse_val je odstraní před numerickým porovnáním
+parse_val <- function(x) {
+  x |>
+    gsub("<.*?>", "", x = _) |>   # odstraň případné HTML tagy
+    gsub("%",     "", x = _) |>
+    gsub("\u00a0", "", x = _) |>  # nezlomitelná mezera
+    gsub("\\s+",  "", x = _) |>
+    gsub(",",     ".", x = _) |>
+    trimws() |>
+    as.numeric()
+}
+
+# Řádky obsahující statistiky kvality modelu
+gof_idx <- which(
+  df$part == "gof" &
+  grepl("AIC|BIC|R2|LRT", df$term)
+)
+
+# Zvýraznění lepší hodnoty zeleně a tučně
+# (nižší AIC/BIC, vyšší pseudo-R2/LRT X2)
+for (i in gof_idx) {
+  val4 <- parse_val(df[[4]][i])
+  val5 <- parse_val(df[[5]][i])
+
+  lower_better <- grepl("AIC|BIC", df$term[i])
+
+  better_col <- if (is.na(val4) || is.na(val5)) NA_integer_ else
+    if (lower_better) {
+      if (val4 <= val5) 4L else 5L
+    } else {
+      if (val4 >= val5) 4L else 5L
+    }
+
+  if (!is.na(better_col)) {
+    df[[better_col]][i] <- cell_spec(
+      df[[better_col]][i],
+      bold  = TRUE,
+      color = "#007B3DFF"
+    )
+  }
+}
+
+# První řádek sekce statistik modelu
+first_gof_row <- which(df$part == "gof")[1]
+
+# Vykreslení výsledné tabulky a oddělení sekce statistik modelu
+df |> select(term, `Model bez interakce`, `Model s interakcí`) |>
+  kbl(escape = FALSE,
+      col.names = c("", "Model bez interakce", "Model s interakcí"),
+      align = c("l", "c", "c")) |>
+  kable_styling() |>
+  pack_rows("Statistiky modelu", first_gof_row, nrow(df),
+            bold = FALSE, italic = TRUE, color = "gray40")
+```
+
+Model s interakcemi dosahuje lepších hodnot všech sledovaných kritérií (AIC, BIC, pseudo-$R^2$ i LRT $\chi^2$). Test poměru věrohodností ukázal, že přidání interakcí vede ke statisticky významnému zlepšení modelu ($p$-hodnota = `r p_anova`). Za cenu lepšího fitu je však model interpretačně složitější.
+
+## Vizuální porovnání modelových predikcí
+
+Grafy níže ukazují predikované křivky obou modelů pro dvě vybrané kombinace kovariát – scenáře s nejnižšími a nejvyššími hodnotami grantu.
+
+```{r porovnani-interakci}
+# Definice dvou typických profilů projektů pro porovnání predikcí
+profil1 <- list(activities_more_than_one = FALSE, action_2 = "Other",
+                eu_subregions_2 = "Other", sea = FALSE, topic_rovnost = FALSE)
+profil2 <- list(activities_more_than_one = TRUE,  action_2 = "Volunteering",
+                eu_subregions_2 = "Eastern",  sea = TRUE, topic_rovnost = TRUE)
+
+# Funkce vytvoří predikce pro zvolený profil a oba modely
+predikce <- function(profil, data, model_ni, model_i) {
+
+  # Výběr pozorování odpovídajících danému profilu
+  red <- data |> filter(
+    activities_more_than_one == profil$activities_more_than_one,
+    action_2        == profil$action_2,
+    eu_subregions_2 == profil$eu_subregions_2,
+    sea             == profil$sea,
+    topic_rovnost   == profil$topic_rovnost
+  )
+
+  # Rozsah délky projektu použitý pro predikční křivku
+  lseq <- seq(min(red$length_days, na.rm = TRUE),
+              max(red$length_days, na.rm = TRUE))
+  
+  # Nová data pro predikci; délka v měsících je pouze aproximační
+  nd <- tibble(!!!profil, length_days = lseq, length_months = lseq / 30) 
+  # length_months = lseq / 30 -> aproximace misto ceiling(lseq / 30)
+
+  # Predikce na linkové škále a převod zpět na původní škálu grantu
+  pred_one <- function(model, label) {
+    p <- predict(model, newdata = nd, type = "link", se.fit = TRUE)
+    tibble(dny = lseq, model = label,
+           fit = exp(p$fit),
+           lo  = exp(p$fit - 1.96 * p$se.fit),
+           hi  = exp(p$fit + 1.96 * p$se.fit))
+  }
+  list(df  = bind_rows(pred_one(model_ni, "Bez interakcí"),
+                       pred_one(model_i,  "S interakcemi")),
+       red = red)
+}
+
+# Funkce pro vykreslení predikčních křivek a intervalů spolehlivosti
+plot_predikce <- function(res) {
+  ggplot(res$df, aes(x = dny, y = fit, color = model, fill = model)) +
+    geom_ribbon(aes(ymin = lo, ymax = hi), color = NA) +
+    geom_line(linewidth = 1) +
+    geom_point(data = res$red, aes(x = length_days, y = eu_grant),
+               inherit.aes = FALSE, size = 0.8, color = "grey40") +
+    scale_color_manual(values = 
+                         c("Bez interakcí" = barvy[1], "S interakcemi" = barvy[5])) +
+    scale_fill_manual(values  
+                      = c("Bez interakcí" = barvy[1], "S interakcemi" = barvy[5])) +
+    scale_y_continuous(labels = label_number(suffix = " tis.", scale = 1e-3)) +
+    labs(x = "Délka projektu (dny)", y = "Výše grantu (€)",
+         color = NULL, fill = NULL) +
+    guides(fill = "none") +
+    theme(legend.position = "top",
+          plot.subtitle = element_text(size = 9, color = "gray40"))
+}
+
+# Výpočet predikcí pro oba profily
+res1 <- predikce(profil1, solidarita_model, model_nointer_final, model_inter_final)
+res2 <- predikce(profil2, solidarita_model, model_nointer_final, model_inter_final)
+```
+
+::: {layout="[[50, 50]]"}
+```{r plot-interakce-profil1}
+#| echo: false
+# Interaktivní verze grafu
+ggplotly(plot_predikce(res1),
+  tooltip = c("x", "y", "fill")) |> 
+  style(opacity = 0.3, traces = c(1,2)) |>
+  style(opacity = 0.5, traces = c(5)) |>
+  layout(
+    annotations = list(
+      x = 0.05, y = 0.90, xref = "paper", yref = "paper",
+      xanchor = "left", yanchor = "top",
+      text = "Akční výzva: Solidarita / Pracovní příležitosti<br>Západní Evropa, Sev. Afrika a Bl. východ<br>Bez moře<br>Bez zaměření na rovnost",
+      showarrow = FALSE, align = "left",
+      font = list(size = 11, color = "black"),
+      bgcolor = "white", bordercolor = "black", borderwidth = 1
+    )
+  ) |>
+  config(
+      displayModeBar = TRUE,
+      displaylogo = FALSE,
+      modeBarButtonsToRemove = c(
+        "zoom", "toImage", "pan2d", "select2d", "lasso2d", "autoScale2d",
+        "hoverClosestCartesian", "hoverCompareCartesian", "toggleSpikelines"
+        )
+      )
+```
+
+```{r plot-interakce-profil2}
+#| echo: false
+# Interaktivní verze grafu
+ggplotly(plot_predikce(res2),
+  tooltip = c("x", "y", "fill")) |> 
+  style(opacity = 0.3, traces = c(1,2)) |>
+  style(opacity = 0.5, traces = c(5)) |>
+  layout(
+    annotations = list(
+      x = 0.05, y = 0.90, xref = "paper", yref = "paper",
+      xanchor = "left", yanchor = "top",
+      text = "Akční výzva: Dobrovolnictví<br>Východní Evropa<br>Přímořská destinace<br>Téma rovnosti",
+      showarrow = FALSE, align = "left",
+      font = list(size = 11, color = "black"),
+      bgcolor = "white", bordercolor = "black", borderwidth = 1
+    )
+  ) |>
+  config(
+      displayModeBar = TRUE,
+      displaylogo = FALSE,
+      modeBarButtonsToRemove = c(
+        "zoom", "toImage", "pan2d", "select2d", "lasso2d", "autoScale2d",
+        "hoverClosestCartesian", "hoverCompareCartesian", "toggleSpikelines"
+        )
+      )
+```
+:::
+
+**Interakce mění nejen velikost, ale i směr některých efektů**. Zatímco u méně typických projektů vedou k vyšším odhadům grantů, u profilu odpovídajícího nejčastějším dobrovolnickým projektům ve východní Evropě vedou naopak k nižším predikovaným grantům, zejména u delších projektů.
+
+# Finální model výše grantu {#sec-model}
+
+Po zvážení obou modelů prezentujeme **model bez interakcí** jako primární výsledek – je interpretačně přímočarý, dosahuje srovnatelné vysvětlující síly (pseudo-$R^2$ `r paste0(dev_ni * 100, " %")`) a splňuje diagnostické podmínky.
+
+## Rovnice modelu
+
+$$
+\begin{aligned}
+\log(\widehat{\text{grant}}_i) &= 7{,}983 + 1{,}955 \cdot \mathbb{I}[\text{activities} > 1] + 0{,}044 \cdot \text{months}_i + 1{,}147 \cdot \mathbb{I}[\text{volunteering}]\\
+&\quad + 0{,}117 \cdot \mathbb{I}[\text{Eastern}] + 0{,}193 \cdot \mathbb{I}[\text{sea}] + 0{,}062 \cdot \mathbb{I}[\text{rovnost}]
+\end{aligned}
+$$
+
+V multiplikativní formě:
+
+$$
+\widehat{\text{grant}}_i = 2930 \times 7{,}06^{\mathbb{I}[\text{act}>1]} \times 1{,}045^{\text{months}} \times 3{,}148^{\mathbb{I}[\text{vol.}]} \times 1{,}126^{\mathbb{I}[\text{East.}]} \times 1{,}214^{\mathbb{I}[\text{sea}]} \times 1{,}065^{\mathbb{I}[\text{rovnost}]}
+$$
+
+## Koeficienty a jejich přesnost
+
+```{r tbl-koeficienty}
+#| tbl-cap: "Koeficienty finálního modelu bez interakcí"
+# Odhady parametrů a jejich multiplikativní interpretace
+cf <- summary(model_nointer_final)$coefficients
+exp_cf <- exp(coef(model_nointer_final))
+
+# Příprava tabulky odhadů parametrů modelu
+tab_koef <- data.frame(
+  Proměnná = row.names(cf),
+  Odhad_beta = round(cf[, 1], 3),
+  exp_beta   = round(exp_cf, 2),
+  SE         = round(cf[, 2], 4),
+  p_hodnota = case_when(
+    cf[, 4] < 0.001 ~ "< 0,001 ***",
+    TRUE ~ paste0(
+      format(round(cf[, 4], 4), decimal.mark = ",", nsmall = 4),
+      case_when(
+        cf[, 4] < 0.01 ~ " **",
+        cf[, 4] < 0.05 ~ " *",
+        cf[, 4] < 0.1  ~ " .",
+        TRUE           ~ ""
+        )
+      )
+    )
+  )
+
+# Přehlednější názvy proměnných pro výstupní tabulku
+coef_rename <- c( "(Intercept)" = "(Konstanta)", 
+                 "topic_rovnostTRUE" = "Téma rovnosti v projektu", 
+                 "activities_more_than_oneTRUE" = 
+                   "Projekt s více než jednou aktivitou",
+                 "action_2Volunteering" = "Dobrovolnický projekt", 
+                 "eu_subregions_2Eastern" = 
+                   "Žadatel z východní Evropy", 
+                 "seaTRUE" = "Žadatel z přímořské destinace", 
+                 "length_months" = "O jeden měsíc delší projekt" )
+
+# Vykreslení tabulky koeficientů modelu
+tab_koef |>
+  mutate(across(1, \(x) coalesce(unname(coef_rename[x]), x))) |>
+kbl(row.names = FALSE,
+    col.names = c("Proměnná", "Koeficient", "Relativní změna", 
+                  "Směrodatná chyba", "p-hodnota"),
+    align = c("l", "r", "r", "r", "r")) |>
+  kable_styling(bootstrap_options = c("striped", "hover")) |>
+  column_spec(1, bold = TRUE, monospace = TRUE) |>
+  column_spec(5, bold = TRUE, 
+              color = ifelse((grepl("\\*|\\.", tab_koef$p_hodnota)), 
+                             "#007B3DFF", "gray40"))
+```
+
+Všechny zahrnuté proměnné jsou statisticky významné na 1% hladině významnosti.
+
+## Interpretace koeficientů
+
+Referenční hladinou jsou projekty s **jednou akční výzvou** (jiná než Volunteering), ze **západní Evropy bez přístupu k moři**, jejichž téma se **netýká rovnosti**. Výchozí predikovaná výše grantu je **2 930 €**.
+
+```{r tbl-interpretace-koeficientu}
+#| tbl-cap: "Interpretace koeficientů modelu"
+
+# Tabulka multiplikativních efektů: exp(koeficient) | procentní změna | směr efektu
+tab_int_data <-
+  exp_cf[names(exp_cf) != "(Intercept)"] |>
+  (\(cf) tibble(term = names(cf), value = unname(cf)))() |>
+  mutate(
+    Faktor = coalesce(unname(coef_rename[term]), term),
+    Efekt  = paste0(
+      "\u00d7 ",
+      format(round(value, 2), decimal.mark = ",", drop0trailing = TRUE),
+      " (",
+      ifelse((value - 1) * 100 >= 0, "+", "\u2212"),
+      format(round(abs(value - 1) * 100, 1), 
+             decimal.mark = ",", drop0trailing = TRUE),
+      " %)"
+      ),
+    Smer = case_when(
+      value > 5 ~ "\u2191\u2191\u2191",
+      value > 2 ~ "↑↑",
+      value > 1 ~ "↑",
+      value < 0.2 ~ "↓",
+      value < 0.5 ~ "↓↓",
+      TRUE    ~ "→"
+      )
+    )
+
+# Zobrazení interpretační tabulky efektů
+tab_int_data |>
+  select(Faktor, Efekt, Smer) |>
+  kbl(col.names = c("Faktor / změna", "Multiplikativní efekt na grant", "Směr")) |>
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE) |>
+  column_spec(1, bold = TRUE) |>
+  column_spec(2, bold = TRUE,
+              color = ifelse(tab_int_data$value >= 1, "#007B3DFF", "#D51317"))
+```
+
+```{r fig-predikce-aktivity}
+#| fig-cap: "Predikce výše grantu - vliv počtu aktivit (Dobrovolnictví, západní Evropa s mořem, bez rovnosti)"
+# Skutečná pozorování odpovídající danému scénáři (podklad pro scatter)
+red_aktivity <- solidarita_model |>
+  filter(action_2 == "Volunteering",
+         !topic_rovnost,
+         eu_subregions_2 == "Other",
+         sea)
+
+# Rozsah délky projektu pro predikční křivky
+lm_seq <- seq(1, 37, by = 1)
+
+# Porovnávané scénáře: jedna vs. více aktivit
+scen_aktivity <- data.frame(
+  activities_more_than_one = c(FALSE, TRUE),
+  label                    = c("Jedna aktivita", "Více aktivit")
+)
+
+# Predikce výše grantu pro oba scénáře
+df_pred_aktivity <- map(1:nrow(scen_aktivity), \(k) {
+  nd <- data.frame(
+    activities_more_than_one = scen_aktivity$activities_more_than_one[k],
+    length_months            = lm_seq,
+    action_2                 = "Volunteering",
+    eu_subregions_2          = "Other",
+    sea                      = TRUE,
+    topic_rovnost            = FALSE
+  )
+  p <- predict(model_nointer_final, newdata = nd, type = "link", se.fit = TRUE)
+  data.frame(mesice = lm_seq, fit = exp(p$fit),
+             lo = exp(p$fit - 1.96 * p$se.fit),
+             hi = exp(p$fit + 1.96 * p$se.fit),
+             skupina = scen_aktivity$label[k])
+  }) |> 
+  list_rbind()
+
+# Převod skupiny na faktor kvůli stabilnímu pořadí v legendě
+df_pred_aktivity <- 
+  df_pred_aktivity |> mutate(skupina = factor(skupina))
+
+# Predikční graf podle počtu aktivit projektu
+p_pred_aktivity <- df_pred_aktivity |>
+  ggplot(aes(x = mesice, y = fit, color = skupina, fill = skupina)) +
+  geom_point(data = red_aktivity,
+             aes(x = length_months, y = eu_grant),
+             inherit.aes = FALSE, color = "gray") +
+  geom_ribbon(aes(ymin = lo, ymax = hi), color = NA) +
+  geom_line(linewidth = 1.1) +
+  scale_color_manual(values = setNames(barvy[c(1, 2)],
+    c("Jedna aktivita", "Více aktivit"))) +
+  scale_fill_manual(values  = setNames(barvy[c(1, 2)],
+    c("Jedna aktivita", "Více aktivit"))) +
+  scale_y_continuous(labels = label_number(suffix = " tis.", scale = 1e-3),
+                     limits = c(0, 550000),
+                     breaks = seq(0, 800000, by = 100000)) +
+  labs(x = "Délka projektu (měsíce)", y = "Výše grantu (€)",
+       color = NULL, fill = NULL) +
+  guides(fill = "none") +
+  theme(legend.position = "top")
+
+# Interaktivní verze grafu
+ggplotly(p_pred_aktivity, tooltip = c("x", "y", "fill")) |>
+  style(opacity = 0.5, hoverinfo = "skip", traces = 1) |>
+  style(opacity = 0.3, traces = 2:3) |>
+  layout(
+    annotations = list(
+      x = 0.05, y = 0.90, xref = "paper", yref = "paper",
+      xanchor = "left", yanchor = "top",
+      text = "Akční výzva: Dobrovolnictví<br>Západní Evropa + Sev. Afrika + Bl. východ s mořem<br>Bez zaměření na rovnost",
+      showarrow = FALSE, align = "left",
+      font = list(size = 11, color = "black"),
+      bgcolor = "white", bordercolor = "black"
+    )
+  ) |>
+  config(
+    displayModeBar = TRUE,
+    displaylogo = FALSE,
+    modeBarButtonsToRemove = c(
+      "zoom", "toImage", "pan2d", "select2d", "lasso2d", "autoScale2d",
+      "hoverClosestCartesian", "hoverCompare"
+    )
+  )
+```
+
+Nejvýznamnějším faktorem je **počet aktivit projektu**. Projekty s více než jednou aktivitou mají v průměru více než sedminásobnou očekávanou výši grantu oproti projektům s jedinou aktivitou, ale reálně se týká jen 1,85 % projektů. Výrazně vyšší granty získávají také **dobrovolnické projekty**, jejichž očekávaná výše grantu je až trojnásobná než u ostatních akčních výzev (projekty solidarity nebo stáže a pracovní místa).
+
+```{r fig-predikce-geo}
+#| fig-cap: "Predikce výše grantu - vliv délky projektu a geolokace (Dobrovolnictví, 1 aktivita, bez rovnosti)"
+# Skutečná pozorování odpovídající danému scénáři (podklad pro scatter)
+red_geo <- solidarita_model |>
+  filter(
+    action_2 == "Volunteering",
+    activities_more_than_one == FALSE,
+    topic_rovnost == FALSE
+  )
+
+# Rozsah délky projektu pro predikční křivky
+lm_seq <- seq(1, 37, by = 1)
+
+# Porovnávané scénáře: východ vs. západ, moře vs. bez moře
+scen_geo <- expand.grid(
+  eu_subregions_2 = c("Eastern", "Other"),
+  sea = c(FALSE, TRUE)
+)
+scen_geo$label <- paste0(
+  ifelse(scen_geo$eu_subregions_2 == "Eastern", "Východní", "Západní"),
+  " Evropa ",
+  ifelse(scen_geo$sea, "s mořem", "bez moře")
+)
+
+# Predikce výše grantu pro všechny čtyři scénáře
+df_pred_geo <- map(1:nrow(scen_geo), \(k) {
+  nd <- data.frame(
+    activities_more_than_one = FALSE,
+    length_months = lm_seq,
+    action_2 = "Volunteering",
+    eu_subregions_2 = scen_geo$eu_subregions_2[k],
+    sea = scen_geo$sea[k],
+    topic_rovnost = FALSE
+  )
+  p <- predict(model_nointer_final, newdata = nd, type = "link", se.fit = TRUE)
+  data.frame(mesice = lm_seq, fit = exp(p$fit),
+             lo = exp(p$fit - 1.96 * p$se.fit),
+             hi = exp(p$fit + 1.96 * p$se.fit),
+             skupina = scen_geo$label[k])
+  }) |> 
+  list_rbind()
+
+# Převod skupiny na faktor kvůli stabilnímu pořadí v legendě
+df_pred_geo <- 
+  df_pred_geo |> mutate(skupina = factor(skupina))
+
+# Predikční graf podle geolokace
+p_pred_geo <- df_pred_geo |>
+  ggplot(aes(x = mesice, y = fit, color = skupina, fill = skupina)) +
+  geom_point(data = red_geo,
+             aes(x = length_months, y = eu_grant),
+             inherit.aes = FALSE, color = "gray50", alpha = 0.25, size = 0.7) +
+  geom_ribbon(aes(ymin = lo, ymax = hi), color = NA) +
+  geom_line(linewidth = 1.1) +
+  scale_color_manual(values = setNames(barvy[c(1,2,5,6)],
+    c("Východní Evropa bez moře", "Západní Evropa bez moře",
+      "Východní Evropa s mořem", "Západní Evropa s mořem"))) +
+  scale_fill_manual(values  = setNames(barvy[c(1,2,5,6)],
+    c("Východní Evropa bez moře", "Západní Evropa bez moře",
+      "Východní Evropa s mořem", "Západní Evropa s mořem"))) +
+  scale_y_continuous(labels = label_number(suffix = " tis.", scale = 1e-3),
+                     limits = c(0, 70000)) +
+  labs(x = "Délka projektu (měsíce)", y = "Výše grantu (€)",
+       color = NULL, fill = NULL) +
+  guides(fill = "none") +
+  theme(legend.position = "top")
+
+# Interaktivní verze grafu
+ggplotly(p_pred_geo, tooltip = c("x", "y", "fill")) |>
+  style(opacity = 0.5, hoverinfo = "skip", traces = c(1)) |>
+  style(opacity = 0.3, traces = c(2:5)) |>
+  layout(
+    annotations = list(
+      x = 0.05, y = 0.90, xref = "paper", yref = "paper",
+      xanchor = "left", yanchor = "top",
+      text = "Akční výzva: Dobrovolnictví<br>Jedna aktivita<br>Bez zaměření na rovnost",
+      showarrow = FALSE, align = "left",
+      font = list(size = 11, color = "black"),
+      bgcolor = "white", bordercolor = "black", borderwidth = 1
+    )
+  ) |>
+  config(
+      displayModeBar = TRUE,
+      displaylogo = FALSE,
+      modeBarButtonsToRemove = c(
+        "zoom", "toImage", "pan2d", "select2d", "lasso2d", "autoScale2d",
+        "hoverClosestCartesian", "hoverCompareCartesian", "toggleSpikelines"
+        )
+      )
+```
+
+Ostatní faktory mají podstatně menší vliv. Delší projekty získávají v průměru o **4,5 % vyšší grant za každý další měsíc trvání**. Mírně vyšší granty jsou spojeny také s projekty **z východní Evropy** (+13 %), ze států s **přístupem k moři** (+21 %) a s **projekty zaměřenými na rovnost** (+6 %). Tyto efekty jsou však ve srovnání s počtem aktivit a typem výzvy výrazně slabší.
+
+## Diagnostika modelu
+
+```{r fig-diagnostika}
+#| echo: true
+#| out-width: 100%
+#| fig-height: 3
+#| fig-width: 10
+#| fig-cap: "Diagnostické grafy finálního modelu"
+# Diagnostické grafy
+par(mfrow = c(1, 3))
+plot(model_nointer_final, which = c(1, 3, 5))
+```
+
+```{r}
+#| include: false
+par(mfrow = c(1, 1))
+```
+
+Grafy reziduí nevykazují žádný zřejmý vzor – model nevynechává žádnou výraznou systematickou závislost. Pozorování č. 5212 má sice velké reziduum (skutečný grant je 1,8× vyšší, než model predikuje), ale jeho leverage a Cookova vzdálenost jsou malé – výsledky modelu nijak zásadně neovlivňuje.
+
+# Závěr {#sec-interpretace}
+
+## Hlavní zjištění
+
+Program Evropského sboru solidarity je tvořen převážně krátkodobými projekty (50 % délka trvání do 1,5 let, 75 % projektů do 2 let) zaměřenými na vzdělávání, občanství a rovnost. Typický projekt trvá méně než dva roky, realizuje jednu aktivitu a kombinuje několik tematických okruhů současně.
+
+Nejsilnějším prediktorem výše grantu je počet aktivit projektu. Projekty s více než jednou aktivitou získávají výrazně vyšší finanční podporu než projekty s jedinou aktivitou. Vyšší granty jsou dále spojeny s dobrovolnickými projekty, delší dobou realizace, projekty realizovanými ve východní Evropě a projekty ze států s přístupem k moři. Naopak vliv tematického zaměření projektu je relativně slabý.
+
+Z geografického pohledu dominují příjemcům grantů státy jižní a střední Evropy. Přestože nejvíce projektů pochází ze Španělska, Itálie, Německa a Francie, vyšší průměrné granty jsou pozorovány například ve Velké Británii nebo u některých menších zemí. Výše grantu tedy nezávisí pouze na počtu realizovaných projektů, ale také na jejich typu a charakteristikách.
+
+**Co zvyšuje výši grantu:**
+
+-   více než jedna aktivita projektu,
+-   dobrovolnická akční výzva,
+-   delší doba realizace projektu,
+-   realizace ve východní Evropě,
+-   realizace ve státě s přístupem k moři,
+-   tematické zaměření na rovnost (slabší efekt).
+
+## Limity analýzy
+
+-   Z dat byla odstraněna pozorování s chybějícím nebo nulovým grantem (\~10 %); pokud tyto hodnoty nejsou zcela náhodné (MCAR), mohou být závěry mírně zkreslené.
+-   Model vysvětluje `r paste0(round(dev_ni * 100, 1), " %")` variability (pseudo-$R^2$) – významná část variability zůstává nevysvětlena a pravděpodobně souvisí s faktory, které dataset neobsahuje (kvalita projektu, hodnoticí proces, specifické cíle projektu apod.).
+-   Analýza vychází z administrativních dat programu a identifikuje statistické souvislosti, nikoli kauzální vztahy.
+-   Proměnná `sea` pravděpodobně zachycuje širší geografické a socioekonomické charakteristiky zemí (jako přístup ke spolupráci, tradice dobrovolnictví v příbřežních zemích), nikoli přímý vliv přístupu k moři.
