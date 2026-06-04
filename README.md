@@ -50,6 +50,11 @@ Analýza faktorů spojených s výší grantu v programu [Evropský sbor solidar
 
 Otevřete `solidarita_analyza.qmd` v RStudiu a renderujte přes Quarto. Potřebné R balíčky: `tidyverse`, `kableExtra`, `plotly`, `scales`, `modelsummary`, `leaflet`, `eurostat`, `sf`.
 
+## Report
+
+Interaktivní report je dostupný na:  
+https://ropej.github.io/eu-solidarity-corps-grants/
+
 ## Licence
 
 Kód: [MIT](LICENSE)  
