@@ -1,56 +1,56 @@
-# EU Solidarity Corps – Grant Analysis
+# Evropský sbor solidarity – analýza grantů
 
-Analysis of factors associated with grant amounts in the [European Solidarity Corps](https://youth.europa.eu/solidarity_cs) programme.
+Analýza faktorů spojených s výší grantu v programu [Evropský sbor solidarity](https://youth.europa.eu/solidarity_cs).
 
-**Authors:** Romana Pejcalová, Jakub Pejcal  
-**Date:** March 2023  
+**Autoři:** Romana Pejcalová, Jakub Pejcal  
+**Datum:** březen 2023  
 **Report:** https://ropej.github.io/eu-solidarity-corps-grants/
 
-## Methods
+## Metody
 
-- Exploratory data analysis (boxplots, choropleth maps)
-- Gamma GLM with log link (model without interactions and with second-order interactions)
-- Model comparison: AIC, BIC, pseudo-R², likelihood ratio test
+- Explorační datová analýza (krabicové grafy, choropletové mapy)
+- Gamma GLM s log-linkem (model bez interakcí a s interakcemi druhého řádu)
+- Porovnání modelů: AIC, BIC, pseudo-R², test poměru věrohodností
 
 ## Data
 
-`solidarita.RData` — R data frame with 1 row per approved project.
+`solidarita.RData` — datový rámec v R, jeden řádek = jeden schválený projekt.
 
-**Source:** Scraped from the public portal [youth.europa.eu/solidarity/projects](https://youth.europa.eu/solidarity/projects) in early 2023. Enriched with country-level characteristics from public sources (CIA World Factbook, World Bank, Human Freedom Index).
+**Zdroj:** Sesbíráno z veřejného portálu [youth.europa.eu/solidarity/projects](https://youth.europa.eu/solidarity/projects) začátkem roku 2023. Obohaceno o charakteristiky jednotlivých zemí z veřejných zdrojů (CIA World Factbook, Světová banka, Human Freedom Index).
 
-### Key variables
+### Klíčové proměnné
 
-| Variable | Type | Description |
+| Proměnná | Typ | Popis |
 |---|---|---|
-| `eu_grant` | numeric | Grant amount (€) — outcome variable |
-| `action` | character | Type of action call (4 categories) |
-| `length_days` | numeric | Project duration in days |
-| `activities_count` | integer | Number of activities |
-| `topics_count` | integer | Number of thematic areas |
-| `country` | character | Applicant country |
-| `eu_subregions` | character | European subregion (CIA classification) |
-| `sea` | logical | Whether the country has sea access |
-| `topic_*` | logical | Thematic flags: education, citizenship, equality, culture, ecology, lifestyle, europeanism, regional, digital |
-| `f_statni_zrizeni` | factor | State system (monarchy / republic type) |
-| `f_emu` | factor | Eurozone membership |
-| `nato_clenem` | factor | NATO membership |
-| `osn_clenem` | factor | UN membership |
-| `prumer4_hdp` | numeric | Average GDP per capita (4-year mean) |
-| `prumer_hustota_osidleni` | numeric | Average population density |
+| `eu_grant` | numeric | Výše grantu (€) — závislá proměnná |
+| `action` | character | Typ výzvy (4 kategorie) |
+| `length_days` | numeric | Délka projektu ve dnech |
+| `activities_count` | integer | Počet aktivit |
+| `topics_count` | integer | Počet tematických oblastí |
+| `country` | character | Země žadatele |
+| `eu_subregions` | character | Evropský subregion (klasifikace CIA) |
+| `sea` | logical | Zda má země přístup k moři |
+| `topic_*` | logical | Tematické příznaky: vzdělávání, občanství, rovnost, kultura, ekologie, životní styl, evropanství, regionalismus, digitalizace |
+| `f_statni_zrizeni` | factor | Státní zřízení (monarchie / typ republiky) |
+| `f_emu` | factor | Členství v eurozóně |
+| `nato_clenem` | factor | Členství v NATO |
+| `osn_clenem` | factor | Členství v OSN |
+| `prumer4_hdp` | numeric | Průměrný HDP na obyvatele (průměr za 4 roky) |
+| `prumer_hustota_osidleni` | numeric | Průměrná hustota osídlení |
 
-## Files
+## Soubory
 
-| File | Description |
+| Soubor | Popis |
 |---|---|
-| `solidarita_analyza.qmd` | Quarto source document |
+| `solidarita_analyza.qmd` | Zdrojový dokument Quarto |
 | `solidarita.RData` | Dataset |
-| `index.html` | Published HTML report |
+| `index.html` | Zveřejněný HTML report |
 
-## Reproducibility
+## Reprodukovatelnost
 
-Open `solidarita_analyza.qmd` in RStudio and render with Quarto. Required R packages: `tidyverse`, `kableExtra`, `plotly`, `scales`, `modelsummary`, `leaflet`, `eurostat`, `sf`.
+Otevřete `solidarita_analyza.qmd` v RStudiu a renderujte přes Quarto. Potřebné R balíčky: `tidyverse`, `kableExtra`, `plotly`, `scales`, `modelsummary`, `leaflet`, `eurostat`, `sf`.
 
-## License
+## Licence
 
-Code: [MIT](LICENSE)  
-Data: [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) — data originates from a public EU portal; country-level enrichment from public sources.
+Kód: [MIT](LICENSE)  
+Data: [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) — data pocházejí z veřejného portálu EU; doplňující data na úrovni zemí z veřejných zdrojů.
