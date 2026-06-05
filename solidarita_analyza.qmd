@@ -21,6 +21,7 @@ format:
       tbl-title: "Tabulka"
     smooth-scroll: true
     code-copy: true
+    google-analytics: "G-KJTWZJGXRQ"
 editor: visual
 ---
 
