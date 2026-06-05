@@ -44,7 +44,7 @@ Analýza faktorů spojených s výší grantu v programu [Evropský sbor solidar
 |---|---|
 | `solidarita_analyza.qmd` | Zdrojový dokument Quarto |
 | `solidarita.RData` | Dataset |
-| `index.html` | Zveřejněný HTML report |
+| `docs/index.html` | Zveřejněný HTML report |
 
 ## Reprodukovatelnost
 
